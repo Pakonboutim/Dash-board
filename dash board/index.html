@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>แดชบอร์ดสรุปผล</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Sarabun', sans-serif; }
+        .card { border: none; border-radius: 0.75rem; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .card-title { font-weight: 600; color: #555; }
+        .donut-chart-container { position: relative; height: 250px; }
+        .donut-chart-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+        .donut-chart-text .percentage { font-size: 2rem; font-weight: bold; }
+        .donut-chart-text .label { font-size: 0.9rem; color: #6c757d; }
+        .student-photo { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+        .student-list-item { display: flex; align-items: center; padding: 0.5rem 0; }
+        .student-list-item span { margin-left: 12px; }
+        .table-responsive { max-height: 300px; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid p-4">
+        <h2 class="mb-4" id="dashboard-title">ภาพรวมการเข้าเรียน</h2>
+        
+        <div class="row justify-content-center mb-4">
+            <div class="col-lg-5 mb-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">ภาพรวมการมาเรียน</h5>
+                        <div class="donut-chart-container">
+                            <canvas id="attendanceDonutChart"></canvas>
+                            <div class="donut-chart-text">
+                                <div class="percentage">0%</div>
+                                <div class="label">0 / 0 คน</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-lg-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title" id="late-students-title">นักเรียนที่มาสาย (0 คน)</h5>
+                        <div class="list-group list-group-flush" id="late-students-list">
+                           </div>
+                    </div>
+                </div>
+            </div>
+             <div class="col-lg-4 mb-4">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title" id="absent-students-title">นักเรียนที่ขาดเรียน (0 คน)</h5>
+                         <div class="list-group list-group-flush" id="absent-students-list">
+                           </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4 mb-4">
+                 <div class="card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">กิจกรรมล่าสุด</h5>
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <tbody id="recent-activities-list">
+                                    </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        // URL ของ Google Sheet ที่เผยแพร่เป็น .csv
+        const GOOGLE_SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTZxpYQHOqzmY_XxPwZUwqBIROIKI-O5aZi7prCkI_TqgYGhLQ9IJQMKON8QpgzPiaf7RkQErLoMKzE/pub?gid=0&single=true&output=csv';
+
+        // ฟังก์ชันแปลง CSV เป็น Array ของ Objects
+        function csvToArray(csvText) {
+            const lines = csvText.trim().split(/\r?\n/);
+            const headers = lines[0].split(',').map(h => h.trim());
+            return lines.slice(1).map(line => {
+                const data = line.split(',').map(d => d.trim());
+                return headers.reduce((obj, header, index) => {
+                    obj[header] = data[index];
+                    return obj;
+                }, {});
+            });
+        }
+
+        async function loadDashboardData() {
+            try {
+                const response = await fetch(GOOGLE_SHEET_URL);
+                const csvText = await response.text();
+                const allActivities = csvToArray(csvText);
+
+                // --- คำนวณค่าต่างๆ จากข้อมูลที่ได้ ---
+                const presentStudents = allActivities.filter(s => s.Status === 'มาเรียน' || s.Status === 'มาสาย');
+                const lateStudents = allActivities.filter(s => s.Status === 'มาสาย');
+                const absentStudents = allActivities.filter(s => s.Status === 'ขาดเรียน');
+                // สมมติว่านักเรียนทั้งหมดคือคนที่มีสถานะ มาเรียน, มาสาย, หรือขาดเรียน
+                const totalStudents = presentStudents.length + absentStudents.length;
+
+                const kpis = {
+                    total_students: totalStudents,
+                    present_today: presentStudents.length,
+                    not_yet_arrived: absentStudents.length,
+                    late_count: lateStudents.length
+                };
+                
+                // --- เรียกฟังก์ชันเพื่อแสดงผล ---
+                renderKPIs(kpis);
+                renderLateStudents(lateStudents);
+                renderAbsentStudents(absentStudents);
+                renderRecentActivities(allActivities);
+
+            } catch (error) {
+                console.error('เกิดข้อผิดพลาดในการโหลดข้อมูล:', error);
+                document.body.innerHTML = `<div class="alert alert-danger m-4">เกิดข้อผิดพลาด: ไม่สามารถโหลดข้อมูลจาก Google Sheet ได้ กรุณาตรวจสอบว่า URL ถูกต้องและเผยแพร่เป็น CSV แล้ว</div>`;
+            }
+        }
+
+        function renderKPIs(kpis) {
+            const percentage = kpis.total_students > 0 ? (kpis.present_today / kpis.total_students * 100).toFixed(1) : 0;
+            document.querySelector('.donut-chart-text .percentage').textContent = `${percentage}%`;
+            document.querySelector('.donut-chart-text .label').textContent = `${kpis.present_today} / ${kpis.total_students} คน`;
+
+            new Chart(document.getElementById('attendanceDonutChart').getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['มาเรียน', 'ขาดเรียน'],
+                    datasets: [{
+                        data: [kpis.present_today, kpis.not_yet_arrived],
+                        backgroundColor: ['rgba(25, 135, 84, 0.8)', 'rgba(220, 53, 69, 0.8)'],
+                        cutout: '70%'
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { enabled: true } }
+                }
+            });
+        }
+
+        function renderLateStudents(students) {
+            const container = document.getElementById('late-students-list');
+            document.getElementById('late-students-title').textContent = `นักเรียนที่มาสาย (${students.length} คน)`;
+            container.innerHTML = '';
+            if (students.length === 0) {
+                container.innerHTML = '<p class="text-muted small p-2">ไม่มีนักเรียนมาสาย</p>';
+                return;
+            }
+            students.forEach(student => {
+                container.innerHTML += `
+                    <div class="list-group-item student-list-item">
+                        <img src="${student.ImageURL}" alt="รูปของ ${student.Name}" class="student-photo">
+                        <span>${student.Name} (${student.Timestamp.split(' ')[1]})</span>
+                    </div>`;
+            });
+        }
+        
+        function renderAbsentStudents(students) {
+            const container = document.getElementById('absent-students-list');
+            document.getElementById('absent-students-title').textContent = `นักเรียนที่ขาดเรียน (${students.length} คน)`;
+            container.innerHTML = '';
+            if (students.length === 0) {
+                container.innerHTML = '<p class="text-muted small p-2">ไม่มีนักเรียนขาดเรียน</p>';
+                return;
+            }
+            students.forEach(student => {
+                container.innerHTML += `
+                    <div class="list-group-item student-list-item">
+                        <img src="${student.ImageURL}" alt="รูปของ ${student.Name}" class="student-photo">
+                        <span>${student.Name}</span>
+                    </div>`;
+            });
+        }
+
+        function renderRecentActivities(activities) {
+            const container = document.getElementById('recent-activities-list');
+            container.innerHTML = '';
+            // แสดง 5 กิจกรรมล่าสุด (เรียงจากใหม่ไปเก่า)
+            activities.slice().reverse().slice(0, 5).forEach(act => {
+                container.innerHTML += `
+                    <tr>
+                        <td><img src="${act.ImageURL}" class="student-photo"></td>
+                        <td>${act.Name}</td>
+                        <td><span class="badge bg-light text-dark">${act.Status}</span></td>
+                        <td>${act.Timestamp.split(' ')[1]}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', loadDashboardData);
+    </script>
+
+</body>
+</html>
